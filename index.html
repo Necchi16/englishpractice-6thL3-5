@@ -76,6 +76,25 @@
       { id: 30, name: "マカロンちょうちょ", emoji: "🦋", color: "bg-purple-200" }
     ];
 
+    // よくある朝ごはんの簡易辞書（APIを使わずにすぐに変換するため）
+    const FOOD_DICTIONARY = {
+      "パン": "bread", "ぱん": "bread", "食パン": "toast", "トースト": "toast",
+      "ごはん": "rice", "ご飯": "rice", "お米": "rice",
+      "おにぎり": "rice balls", "おむすび": "rice balls",
+      "りんご": "apple", "リンゴ": "apple", "林檎": "apple",
+      "バナナ": "banana", "ばなな": "banana",
+      "たまご": "egg", "卵": "egg", "玉子": "egg", "目玉焼き": "fried egg", "ゆで卵": "boiled egg",
+      "サラダ": "salad", "スープ": "soup",
+      "味噌汁": "miso soup", "みそしる": "miso soup",
+      "シリアル": "cereal", "コーンフレーク": "cereal",
+      "ヨーグルト": "yogurt", "牛乳": "milk", "ミルク": "milk", "チーズ": "cheese",
+      "肉": "meat", "お肉": "meat", "ソーセージ": "sausage", "ウインナー": "sausage", "ベーコン": "bacon",
+      "魚": "fish", "お魚": "fish", "焼き魚": "grilled fish",
+      "ホットケーキ": "pancakes", "パンケーキ": "pancakes",
+      "納豆": "natto", "なっとう": "natto",
+      "うどん": "udon", "パスタ": "pasta", "ラーメン": "ramen"
+    };
+
     // --- アプリケーション本体 ---
     function App() {
       const [step, setStep] = useState('HOME'); 
@@ -147,48 +166,49 @@
         }
       }, [step, speak]);
 
-      // --- 日本語から英語への翻訳処理 (Gemini API) ---
+      // --- 日本語から英語への翻訳処理 (辞書 + MyMemory API) ---
       const translateFood = async () => {
-        if (!jaFood.trim() || jaFood === "きいています...") return;
+        const inputFood = jaFood.trim();
+        if (!inputFood || inputFood === "きいています...") return;
+        
         setIsTranslating(true);
         
-        const apiKey = "";
-        const prompt = `次の日本語の食べ物の名前を、英語の単語(小文字)に翻訳してください。冠詞(a, an)はつけず、答えの英単語のみを出力してください。\n日本語: ${jaFood}`;
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
-        const payload = {
-            contents: [{ parts: [{ text: prompt }] }]
-        };
-
-        let retries = 5;
-        let delay = 1000;
-        let translated = "";
-
-        while (retries > 0) {
-            try {
-                const response = await fetch(url, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                if (response.ok) {
-                    const data = await response.json();
-                    translated = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
-                    translated = translated.replace(/[.!?。、\n]/g, "").toLowerCase().trim();
-                    break;
-                }
-            } catch (e) {
-                console.error("Translation error, retrying...", e);
-            }
-            retries--;
-            if (retries > 0) await new Promise(res => setTimeout(res, delay));
-            delay *= 2;
-        }
-        
-        if (!translated) {
-            translated = "something"; // エラー時のフォールバック
+        // 1. まずは内蔵の辞書をチェック
+        if (FOOD_DICTIONARY[inputFood]) {
+          setEngFood(FOOD_DICTIONARY[inputFood]);
+          setTimeout(() => {
+            setIsTranslating(false);
+            setFailCount(0);
+            setStep('SPEAK_PRACTICE');
+          }, 600); // 翻訳中アニメーションを少し見せるための待機
+          return;
         }
 
-        setEngFood(translated);
+        // 2. 辞書になければ無料の翻訳API (MyMemory API) を使う
+        try {
+          const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(inputFood)}&langpair=ja|en`;
+          const response = await fetch(url);
+          if (response.ok) {
+            const data = await response.json();
+            let translated = data.responseData.translatedText.toLowerCase();
+            
+            // 記号を取り除く
+            translated = translated.replace(/[.!?。、\n]/g, "").trim();
+            // a, an, the, some などの冠詞を簡易的に消す（要望の形に近づけるため）
+            translated = translated.replace(/^(a|an|the|some)\s+/i, "");
+            
+            setEngFood(translated);
+            setIsTranslating(false);
+            setFailCount(0);
+            setStep('SPEAK_PRACTICE');
+            return;
+          }
+        } catch (e) {
+          console.error("Translation error:", e);
+        }
+
+        // 3. APIも失敗した場合のフォールバック
+        setEngFood("something");
         setIsTranslating(false);
         setFailCount(0);
         setStep('SPEAK_PRACTICE');
